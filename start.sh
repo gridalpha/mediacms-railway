@@ -85,6 +85,36 @@ sed -i -E "s/-c10/-c ${CELERY_SHORT_CONCURRENCY}/" "$SHORT_CONF"
 grep -q -- "-c ${CELERY_SHORT_CONCURRENCY}" "$SHORT_CONF" || { log "FATAL: celery_short concurrency not set"; exit 1; }
 log "celery pools: short=${CELERY_SHORT_CONCURRENCY} long=${CELERY_LONG_CONCURRENCY}"
 
-# --- 6. hand over to the image's own launcher --------------------------------
+# --- 6. point django.contrib.sites at this deployment ------------------------
+# allauth builds every email's subject prefix and greeting from the Site row,
+# which ships as example.com, so a stock deployment mails
+# "[example.com] Password Reset E-mail". Upstream's prestart.sh has the fix
+# commented out. This runs behind the server so the health check is not delayed,
+# retries until migrations have created the table, and only rewrites a row still
+# holding the shipped default — an operator's change in /admin is never reverted.
+(
+    for _ in $(seq 1 60); do
+        if python manage.py shell -c "
+from django.conf import settings
+from django.contrib.sites.models import Site
+host = settings.FRONTEND_HOST.split('://')[-1].rstrip('/')
+site = Site.objects.filter(pk=settings.SITE_ID).first()
+if site is None:
+    Site.objects.create(pk=settings.SITE_ID, domain=host, name=settings.PORTAL_NAME)
+    print('[railway] created Site row for ' + host)
+elif site.domain in ('example.com', '', host):
+    site.domain, site.name = host, settings.PORTAL_NAME
+    site.save()
+    print('[railway] Site row set to ' + host)
+else:
+    print('[railway] Site row left at ' + site.domain + ' (operator-configured)')
+" 2>/dev/null; then
+            break
+        fi
+        sleep 5
+    done
+) &
+
+# --- 7. hand over to the image's own launcher --------------------------------
 log "starting MediaCMS"
 exec deploy/docker/start.real.sh
