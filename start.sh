@@ -14,15 +14,18 @@ cd "$APP"
 
 log() { echo "[railway] $*"; }
 
-# --- 1. seed the assets the image ships inside media_files -------------------
-# A Railway volume mounted at media_files hides the default avatar, banner and
-# audio poster that live in the image, so copy them back. -n never overwrites,
-# so an operator's replacements survive every redeploy.
-if [ -d "$SEED" ]; then
-    mkdir -p "$APP/media_files"
-    cp -rn "$SEED"/* "$APP/media_files/" 2>/dev/null || true
-    log "media_files now holds: $(ls -A "$APP/media_files" | tr '\n' ' ')"
+# --- 1. seed the default avatar, banner and audio poster ---------------------
+# upstream's .dockerignore drops media_files/** from the published image, and a
+# Railway volume mounts over the directory anyway, so these are vendored in this
+# repo and copied in. -n never overwrites, so an operator's replacements survive
+# every redeploy.
+mkdir -p "$APP/media_files"
+cp -rn "$SEED"/* "$APP/media_files/" 2>/dev/null || true
+if [ ! -s "$APP/media_files/userlogos/user.jpg" ]; then
+    log "FATAL: default user avatar missing from media_files after seeding"
+    exit 1
 fi
+log "media_files now holds: $(ls -A "$APP/media_files" | tr '\n' ' ')"
 mkdir -p "$APP/media_files/hls" "$APP/media_files/original" "$APP/media_files/encoded"
 chown -R www-data:www-data "$APP/media_files"
 

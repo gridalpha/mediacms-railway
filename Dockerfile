@@ -13,8 +13,10 @@
 #   * celery_long ships with no concurrency flag and forks one copy of the whole
 #     Django app per *host* core (48 here) — an OOM kill before the first boot
 #     completes.
-#   * A volume mounted at media_files hides the default avatars the image ships
-#     inside it, so they are copied out at build time and seeded back at boot.
+#   * upstream's .dockerignore excludes media_files/**, so the default user
+#     avatar and channel banner every account falls back to are missing from the
+#     published image entirely — their compose supplies them by bind-mounting
+#     the host checkout. They are vendored here and seeded onto the volume.
 FROM mediacms/mediacms:latest
 
 USER root
@@ -23,11 +25,14 @@ WORKDIR /home/mediacms.io/mediacms
 COPY railway_client_ip.py cms/railway_client_ip.py
 COPY railway_local_settings.py /opt/railway/railway_local_settings.py
 COPY start.sh /opt/railway/start.sh
+COPY media_seed /opt/railway/media_seed
 
 RUN set -eux; \
-    # keep the assets the image ships inside media_files, which a volume hides
-    cp -a media_files /opt/railway/media_seed; \
-    ls -A /opt/railway/media_seed; \
+    # users.User.logo defaults to userlogos/user.jpg and the channel banner to
+    # userlogos/banner.jpg, so without these every avatar is a broken image
+    test -s /opt/railway/media_seed/userlogos/user.jpg; \
+    test -s /opt/railway/media_seed/userlogos/banner.jpg; \
+    test -s /opt/railway/media_seed/userlogos/poster_audio.jpg; \
     # recover the real client IP: two proxies sit in front of Django, so
     # REMOTE_ADDR is otherwise always 127.0.0.1
     sed -i 's|^MIDDLEWARE = \[|MIDDLEWARE = [\n    "cms.railway_client_ip.ClientIPMiddleware",|' cms/settings.py; \
